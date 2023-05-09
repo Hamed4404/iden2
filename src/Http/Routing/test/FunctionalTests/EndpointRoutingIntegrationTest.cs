@@ -343,4 +343,149 @@ public class EndpointRoutingIntegrationTest
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => server.CreateRequest("/").SendAsync("GET"));
         Assert.Equal(CORSErrorMessage, ex.Message);
     }
+
+    private class CustomMetadata
+    {
+        public string Whatever { get; set; }
+    }
+
+    private class CustomMetadata2
+    {
+        public string Whatever { get; set; }
+    }
+
+    [Fact]
+    public async Task CanAddMetadataOnlyToEndpoints()
+    {
+        // Arrange
+        using var host = new HostBuilder()
+            .ConfigureWebHost(webHostBuilder =>
+            {
+                webHostBuilder
+                    .Configure(app =>
+                    {
+                        app.UseRouting();
+                        app.UseEndpoints(b =>
+                        {
+                            b.MapMetadata("/{**subpath}").WithMetadata(new CustomMetadata { Whatever = "This is on every endpoint now!" });
+                            b.Map("/test/sub",
+                                (HttpContext context) =>
+                                {
+                                    Assert.Equal("This is on every endpoint now!", context.GetEndpoint()?.Metadata.GetMetadata<CustomMetadata>().Whatever);
+                                    return "Success!";
+                                });
+                        });
+                    })
+                    .UseTestServer();
+            })
+            .ConfigureServices(services =>
+            {
+                services.AddRouting();
+            })
+            .Build();
+
+        using var server = host.GetTestServer();
+
+        await host.StartAsync();
+
+        var response = await server.CreateRequest("/test/sub").SendAsync("GET");
+
+        response.EnsureSuccessStatusCode();
+        Assert.Equal($"Success!", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task CanNestMetadataOnlyEndpoints()
+    {
+        // Arrange
+        using var host = new HostBuilder()
+            .ConfigureWebHost(webHostBuilder =>
+            {
+                webHostBuilder
+                    .Configure(app =>
+                    {
+                        app.UseRouting();
+                        app.UseEndpoints(b =>
+                        {
+                            b.MapMetadata("/{**subpath}").WithMetadata(new CustomMetadata { Whatever = "This is on every endpoint now!" });
+                            b.MapMetadata("/sub/{**subpath}").WithMetadata(new CustomMetadata2 { Whatever = "Nested!" });
+                            b.Map("/test/notsub",
+                                (HttpContext context) =>
+                                {
+                                    Assert.Equal("This is on every endpoint now!", context.GetEndpoint()?.Metadata.GetMetadata<CustomMetadata>().Whatever);
+                                    Assert.Null(context.GetEndpoint()?.Metadata.GetMetadata<CustomMetadata2>());
+                                    return "Success!";
+                                });
+                            b.Map("/sub/nested",
+                                (HttpContext context) =>
+                                {
+                                    Assert.Equal("This is on every endpoint now!", context.GetEndpoint()?.Metadata.GetMetadata<CustomMetadata>().Whatever);
+                                    Assert.Equal("Nested!", context.GetEndpoint()?.Metadata.GetMetadata<CustomMetadata2>().Whatever);
+                                    return "Success!";
+                                });
+                        });
+                    })
+                    .UseTestServer();
+            })
+            .ConfigureServices(services =>
+            {
+                services.AddRouting();
+            })
+            .Build();
+
+        using var server = host.GetTestServer();
+
+        await host.StartAsync();
+
+        var response = await server.CreateRequest("/test/notsub").SendAsync("GET");
+        response.EnsureSuccessStatusCode();
+        Assert.Equal($"Success!", await response.Content.ReadAsStringAsync());
+
+        response = await server.CreateRequest("/sub/nested").SendAsync("GET");
+        response.EnsureSuccessStatusCode();
+        Assert.Equal($"Success!", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task CanAddMetadataWithAuthZ()
+    {
+        // Arrange
+        using var host = new HostBuilder()
+            .ConfigureWebHost(webHostBuilder =>
+            {
+                webHostBuilder
+                    .Configure(app =>
+                    {
+                        app.UseRouting();
+                        app.UseAuthorization();
+                        app.UseEndpoints(b =>
+                        {
+                            b.MapMetadata("/{**subpath}").WithMetadata(new CustomMetadata { Whatever = "This is on every endpoint now!" });
+                            b.Map("/test/sub",
+                                (HttpContext context) =>
+                                {
+                                    Assert.Equal("This is on every endpoint now!", context.GetEndpoint()?.Metadata.GetMetadata<CustomMetadata>().Whatever);
+                                    Assert.NotNull(context.GetEndpoint()?.Metadata.GetMetadata<IAuthorizeData>());
+                                    return "Success!";
+                                }).RequireAuthorization();
+                        });
+                    })
+                    .UseTestServer();
+            })
+            .ConfigureServices(services =>
+            {
+                services.AddAuthorization(o => o.DefaultPolicy = new AuthorizationPolicyBuilder().RequireAssertion(_ => true).Build());
+                services.AddRouting();
+            })
+            .Build();
+
+        using var server = host.GetTestServer();
+
+        await host.StartAsync();
+
+        var response = await server.CreateRequest("/test/sub").SendAsync("GET");
+
+        response.EnsureSuccessStatusCode();
+        Assert.Equal($"Success!", await response.Content.ReadAsStringAsync());
+    }
 }
