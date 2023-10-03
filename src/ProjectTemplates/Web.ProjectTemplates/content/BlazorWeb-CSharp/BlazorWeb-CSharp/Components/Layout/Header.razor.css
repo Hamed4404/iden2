@@ -1,0 +1,18 @@
+.navbar-brand {
+    height: 3.5rem;
+    font-size: 1.1rem;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    margin: 0;
+    background-color: var(--bl-blazor-brand-color1);
+
+    &, &:hover, &:visited {
+        color: var(--bl-blazor-brand-contrast-color);
+    }
+
+    @media (width >= 641px) {
+        width: 250px;
+        margin-right: 1rem;
+    }
+}
